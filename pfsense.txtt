@@ -1,0 +1,665 @@
+================================================================================
+        pfSense FIREWALL - INSTALLATION & CONFIGURATION GUIDE
+        PGCP-ITISS Lab | C-DAC ACTS Pune | pfSense CE 2.6.0
+================================================================================
+
+TABLE OF CONTENTS
+-----------------
+  1. Create Virtual Machine & Install pfSense
+  2. Initial Web Console (GUI) Setup
+  3. Install Squid Proxy
+  4. Configure Squid Proxy
+  5. Install SquidGuard
+  6. Configure SquidGuard (URL Filtering)
+  7. Configure SSL Man-in-the-Middle (HTTPS Inspection)
+  8. User-Based Internet Access Control
+
+
+================================================================================
+PHASE 1 : CREATE VIRTUAL MACHINE & INSTALL pfSense
+================================================================================
+
+[ VM HARDWARE SETUP IN VMWARE WORKSTATION / PLAYER ]
+
+Step 1 : Open VMware - Create New VM
+         Launch VMware Workstation 16 Player.
+         Click "Create a New Virtual Machine".
+
+Step 2 : Select Installation Method
+         On the wizard choose "I will install the operating system later".
+         Click Next.
+
+Step 3 : Choose Guest OS
+         Guest OS  --> Linux
+         Version   --> Ubuntu 64-bit
+         Click Next.
+         NOTE: pfSense is FreeBSD-based but Ubuntu 64-bit works fine in VMware.
+
+Step 4 : Name the VM & Set Location
+         Virtual machine name : pfsense
+         Location             : D:\Virtual Machines\pfsense (or your path)
+         Click Next.
+
+Step 5 : Specify Disk Capacity
+         Maximum disk size  : 60 GB
+         Storage option     : Store virtual disk as a single file
+         Click Next.
+
+Step 6 : Review Summary & Finish
+         Verify:
+           Name            = pfsense
+           Hard Disk       = 60 GB
+           Memory          = 4096 MB
+           Network Adapter = NAT
+         Click Finish.
+
+------------------------------------------------------------------------
+
+[ ATTACH ISO & ADD SECOND NETWORK CARD ]
+
+Step 7 : Edit VM Settings - Attach pfSense ISO
+         Select the VM --> Click "Edit virtual machine settings"
+         Click CD/DVD (SATA)
+         Choose "Use ISO image file"
+         Browse to the downloaded pfSense-CE-x.x.x-RELEASE.iso file.
+
+Step 8 : Add a Second Network Adapter
+         In VM Settings --> Click Add at the bottom
+         Select Network Adapter --> Click Finish.
+
+Step 9 : Configure Network Adapters
+         pfSense requires exactly 2 NICs:
+
+         Adapter              | VMware Mode | pfSense Role | Purpose
+         ---------------------|-------------|--------------|------------------------------
+         Network Adapter 1   | NAT         | WAN (em0)    | Internet via host
+         Network Adapter 2   | Host-only   | LAN (em1)    | Internal private network
+
+Step 10: Start the VM
+         Click OK to close settings.
+         Click the green Play button or "Play virtual machine".
+         pfSense boot screen will appear.
+
+------------------------------------------------------------------------
+
+[ pfSense INSTALLER WALKTHROUGH ]
+
+Step 11: Accept Copyright Notice
+         Wait for Copyright & Distribution screen.
+         Press Enter to Accept.
+
+Step 12: Choose Install
+         Welcome screen --> "Install" is pre-selected.
+         Press Enter (OK).
+
+Step 13: Keymap Selection
+         "Continue with default keymap" is highlighted.
+         Press Enter.
+
+Step 14: Partitioning - ZFS Configuration
+         Default option is Auto (ZFS).
+         Press Enter (OK) to proceed.
+
+Step 15: ZFS - Proceed with Installation
+         On ZFS Configuration screen select >> Install.
+         Press Enter.
+
+Step 16: Virtual Device Type - Stripe
+         Select "Stripe - No Redundancy".
+         Press Enter (OK).
+
+Step 17: Select Disk
+         Press Spacebar to select da0 (VMware Virtual Disk).
+         Press Enter (OK).
+
+Step 18: Last Chance Confirmation
+         "Last Chance! Are you sure you want to destroy da0?"
+         Press Enter to confirm YES.
+         WARNING: This erases all data on da0. Fine for VM use.
+
+Step 19: Installation Begins
+         Files are fetched and extracted.
+         Wait for the progress bar to complete (a few minutes).
+
+Step 20: Manual Configuration Prompt
+         "Installation is now finished. Would you like to open a shell?"
+         Choose No --> Press Enter.
+
+Step 21: Reboot
+         "Installation of pfSense complete! Would you like to reboot?"
+         Press Enter (Reboot).
+         pfSense will boot into its main console menu.
+
+------------------------------------------------------------------------
+
+[ CONFIGURE LAN IP ADDRESS AFTER BOOT ]
+
+NOTE: After boot pfSense assigns 192.168.1.1/24 to LAN by default.
+      We must change this to match the VMnet1 (Host-only) adapter
+      range on the Windows host.
+
+Step 22: Find VMnet1 IP on Windows Host
+         Open Command Prompt on Windows host and run:
+           ipconfig
+         Find "VMware Network Adapter VMnet1" and note its IPv4 address.
+         Example: 192.168.148.1
+
+Step 23: Set LAN IP on pfSense Console
+         In pfSense console menu --> Type 2 --> Press Enter
+         ("Set Interface(s) IP Address")
+
+Step 24: Select LAN Interface
+         Available interfaces:
+           1 = WAN (em0)
+           2 = LAN (em1)
+         Type 2 --> Press Enter.
+
+Step 25: Enter New LAN IP
+         Enter IP in the VMnet1 range.
+         Example: 192.168.148.10
+         Press Enter.
+         WARNING: Do NOT use the same IP as your Windows VMnet1 adapter.
+
+Step 26: Enter Subnet Mask
+         Subnet bit count --> Type 24 --> Press Enter
+         (24 = 255.255.255.0)
+
+Step 27: Upstream Gateway (LAN only)
+         "For a LAN, press Enter for none"
+         Just press Enter.
+
+Step 28: IPv6 - Skip
+         "Enter the new LAN IPv6 address"
+         Press Enter to skip.
+
+Step 29: DHCP Server on LAN?
+         "Do you want to enable the DHCP server on LAN? (y/n)"
+         Type n --> Press Enter.
+         NOTE: In production you would enable DHCP for automatic client IPs.
+
+Step 30: Revert to HTTP?
+         "Do you want to revert to HTTP as the webConfigurator protocol? (y/n)"
+         Type n --> Press Enter.
+         (Keeps HTTPS access to pfSense web console - more secure)
+
+RESULT: LAN IP is now configured.
+        pfSense console shows: LAN (lan) --> em1 --> v4: 192.168.148.10/24
+
+
+================================================================================
+PHASE 2 : INITIAL WEB CONSOLE (GUI) SETUP
+================================================================================
+
+NOTE: Perform these steps from a SECOND VM (Windows or Linux).
+      That VM's NIC must be in Host-only mode with a static IP
+      in the same subnet as pfSense LAN (e.g., 192.168.148.20/24).
+
+Step 1 : Open Browser - Navigate to pfSense WebGUI
+         Type in browser: https://192.168.148.10
+         (Replace with your pfSense LAN IP)
+         A self-signed certificate warning appears.
+         Click Advanced --> Proceed to site.
+
+Step 2 : Login
+         Username : admin
+         Password : pfsense   (default credentials)
+
+Step 3 : Setup Wizard - Step 1 (Welcome)
+         Click Next on the Welcome to pfSense screen.
+
+Step 4 : Step 2 (Netgate Global Support)
+         Click Next.
+
+Step 5 : Step 2 - General Information (DNS & Hostname)
+         Field                | Value (Lab Example)
+         ---------------------|--------------------
+         Hostname             | HQ-pfSense
+         Domain               | demo.lab
+         Primary DNS Server   | 8.8.8.8
+         Secondary DNS Server | 8.8.4.4
+         Override DNS         | Checked
+         Click Next.
+
+Step 6 : Step 3 - Time Server
+         Keep defaults:
+           Time server hostname : 2.pfsense.pool.ntp.org
+           Timezone             : Asia/Kolkata (or your timezone)
+         Click Next.
+
+Step 7 : Step 4 - Configure WAN Interface
+         SelectedType : DHCP (keep default for lab)
+         Leave MAC Address, MTU, MSS blank.
+
+         Two rules at bottom of page:
+         Rule                         | What It Does
+         -----------------------------|------------------------------------------
+         Block RFC1918 Private Nets   | Blocks 10/8, 172.16/12, 192.168/16 on WAN
+         Block Bogon Networks         | Blocks IANA-reserved/unassigned IPs on WAN
+         Both are checked by default - LEAVE THEM CHECKED.
+
+         Click Next.
+
+Step 8 : Step 5 - Configure LAN Interface
+         LAN IP Address : 192.168.148.10 (already set from console)
+         Subnet Mask    : 24
+         Keep as is --> Click Next.
+
+Step 9 : Step 6 - Set Admin Password
+         Enter a strong new password for admin in both fields.
+         Click Next.
+         WARNING: Default password is "pfsense". Change it immediately.
+                  Using default credentials is a critical security risk.
+
+Step 10: Step 7 - Reload Configuration
+         Click Reload. pfSense applies all settings.
+
+Step 11: Step 9 - Check for Updates
+         Click "Check for Updates".
+         If updates exist they download automatically.
+         When done the screen shows "Up to date".
+
+RESULT: pfSense initial GUI setup is complete.
+        You should now see the full pfSense Dashboard.
+
+
+================================================================================
+PHASE 3 : INSTALL SQUID PROXY ON pfSense
+================================================================================
+
+NOTE: Squid is a high-performance web proxy/caching server. On pfSense
+      it intercepts HTTP/HTTPS traffic from LAN clients, enabling
+      logging, filtering, and caching.
+
+Step 1 : Navigate to Package Manager
+         Top menu --> System --> Package Manager
+
+Step 2 : Click Available Packages Tab
+         Click the "Available Packages" tab.
+
+Step 3 : Search for Squid
+         Search box --> type: squid --> Click Search
+         Three packages appear: LightSquid, squid, squidGuard
+
+Step 4 : Install Squid Package
+         Find row where Name = squid (version 0.4.45_9)
+         Click the [+ Install] button on the right.
+
+Step 5 : Confirm Installation
+         "Confirmation Required to install package pfSense-pkg-squid"
+         Click Confirm.
+
+Step 6 : Wait for Installation to Complete
+         Package Installer shows real-time log output.
+         Downloads and installs approx 13 dependency packages.
+         Wait until you see "Success" at the bottom.
+         NOTE: Do not close or refresh the page during installation.
+
+RESULT: Squid is now installed.
+        Verify under: System --> Package Manager --> Installed Packages
+
+
+================================================================================
+PHASE 4 : CONFIGURE SQUID PROXY
+================================================================================
+
+[ STEP A - LOCAL CACHE TAB ]
+
+Step 1 : Open Squid Settings
+         Top menu --> Services --> Squid Proxy Server
+
+Step 2 : Go to Local Cache Tab
+         Click the "Local Cache" tab.
+         Available settings: Hard Disk Cache Size, Cache Location,
+         Memory Cache Size.
+         For this lab KEEP ALL DEFAULTS.
+
+Step 3 : Save Cache Settings
+         Click Save.
+
+------------------------------------------------------------------------
+
+[ STEP B - GENERAL SETTINGS TAB ]
+
+Step 4 : Click General Tab
+         Click the "General" tab on the Squid Proxy Server page.
+
+Step 5 : Enable Squid Proxy
+         Check the box "Check to enable the Squid proxy".
+         IMPORTANT: If unchecked ALL Squid services will be disabled.
+
+Step 6 : Select Proxy Interfaces
+         In "Proxy Interface(s)"
+         Hold Ctrl and click to select BOTH: LAN and loopback
+
+Step 7 : Check Proxy Port
+         Proxy Port = 3128 (default - keep as is)
+
+Step 8 : Enable Access Logging
+         Scroll down --> Check "Enable Access Logging" checkbox.
+         Log Store Directory defaults to: /var/squid/logs
+         WARNING: Do NOT enable if disk space is critically low.
+
+Step 9 : Set Visible Hostname & Admin Email
+         Field                  | Example Value
+         -----------------------|------------------
+         Visible Hostname       | proxy.demo.lab
+         Administrator's Email  | admin@demo.lab
+
+Step 10: Save & Start Squid
+         Scroll to bottom --> Click Save.
+         Squid proxy service starts.
+         Restart/Stop buttons appear at top confirming service is running.
+
+RESULT: Squid Proxy is now running on port 3128 on the LAN interface.
+
+
+================================================================================
+PHASE 5 : INSTALL SQUIDGUARD
+================================================================================
+
+NOTE: SquidGuard is a URL filter add-on for Squid. It blocks websites
+      based on blacklists and target categories. It works as a
+      redirector plug-in for Squid.
+
+Step 1 : Go Back to Package Manager
+         Top menu --> System --> Package Manager --> Available Packages tab
+
+Step 2 : Search for SquidGuard
+         Search box --> type: squid --> Click Search
+         Now 2 packages shown (squid is already installed).
+
+Step 3 : Install SquidGuard
+         Find "squidGuard" (version 1.16.18_20)
+         Click [+ Install].
+
+Step 4 : Confirm Installation
+         Click Confirm.
+         Wait for installation to complete.
+         Final log output shows "Success".
+
+RESULT: SquidGuard installed successfully.
+
+
+================================================================================
+PHASE 6 : CONFIGURE SQUIDGUARD (URL FILTERING)
+================================================================================
+
+[ STEP A - GENERAL SETTINGS & BLACKLIST DOWNLOAD ]
+
+Step 1 : Open SquidGuard Settings
+         Top menu --> Services --> SquidGuard Proxy Filter
+
+Step 2 : DO NOT Enable SquidGuard Yet
+         On General Settings tab - DO NOT check the Enable checkbox yet.
+         You must set up Target Categories first.
+         CRITICAL: Enabling before creating a Target Category will
+                   cause SquidGuard to block ALL traffic.
+
+Step 3 : Enable Blacklist
+         Scroll down on General Settings.
+         Under "Blacklist options" - Check the "Blacklist" checkbox.
+
+Step 4 : Enter Blacklist URL
+         In the "Blacklist URL" field enter:
+         https://dsi.ut-capitole.fr/blacklists/download/blacklists_for_pfsense.tar.gz
+
+         This is the UT1 (Universite Toulouse) public blacklist -
+         a large community-maintained URL block list.
+
+Step 5 : Click Save
+         Scroll to bottom --> Click Save.
+
+------------------------------------------------------------------------
+
+[ STEP B - DOWNLOAD THE BLACKLIST ]
+
+Step 6 : Go to Blacklist Tab
+         Click the "Blacklist" tab at the top of the SquidGuard page.
+
+Step 7 : Verify URL & Download
+         Confirm the blacklist URL is shown.
+         Click the "Download" button.
+         Blacklist Update Log shows download progress.
+         Wait for "Completed" or "Done" message.
+         NOTE: The blacklist archive is large (several hundred MB).
+               Download time depends on internet speed.
+
+------------------------------------------------------------------------
+
+[ STEP C - CREATE TARGET CATEGORY ]
+
+Step 8 : Go to Target Categories Tab
+         Click the "Target categories" tab.
+
+Step 9 : Click Add
+         Click the [+ Add] button on the right side.
+
+Step 10: Configure the Target Category
+         Field   | Value
+         --------|----------------
+         Name    | Allowed_content
+         Order   | -- (leave default)
+         Log     | Check this checkbox
+
+Step 11: Save the Target Category
+         Click Save.
+         "Allowed_content" now appears in the list.
+         Click Save again on the Target categories list page.
+
+------------------------------------------------------------------------
+
+[ STEP D - ENABLE SQUIDGUARD ]
+
+Step 12: Go Back to General Settings
+         Click the "General settings" tab.
+
+Step 13: Enable SquidGuard
+         Now check the "Enable" checkbox.
+
+Step 14: Click Apply
+         Click the "Apply" button (NOT just Save).
+         SquidGuard service state changes:
+           STOPPED --> STARTED
+
+         IMPORTANT: You must click APPLY (not just Save) for
+                    SquidGuard changes to take effect.
+
+RESULT: SquidGuard is now active and performing URL filtering
+        on all proxy traffic through pfSense.
+
+
+================================================================================
+PHASE 7 : CONFIGURE SSL MAN-IN-THE-MIDDLE (HTTPS INSPECTION)
+================================================================================
+
+NOTE: SSL MitM allows Squid to decrypt, inspect, and re-encrypt HTTPS
+      traffic. Without this, Squid can only see the domain name (SNI)
+      not the full URL. This enables accurate content filtering on
+      HTTPS sites.
+
+------------------------------------------------------------------------
+
+[ STEP A - CREATE INTERNAL CERTIFICATE AUTHORITY (CA) ]
+
+Step 1 : Open Cert Manager
+         Top menu --> System --> Cert. Manager
+
+Step 2 : Go to CAs Tab
+         Click the "CAs" tab. Table is empty by default.
+
+Step 3 : Click Add
+         Click [+ Add] button on the right.
+
+Step 4 : Configure the CA
+         Field                  | Value
+         -----------------------|-------------------------------------------
+         Descriptive name       | demo-CA
+         Method                 | Create an Internal Certificate Authority
+         Trust Store            | Unchecked (for now)
+         Key type               | RSA
+         Key Length             | 2048
+         Digest Algorithm       | sha256
+         Lifetime (days)        | 3650  (10 years)
+         Common Name            | internal-ca
+         Country Code           | IN
+         State or Province      | MH
+         City                   | PN
+         Organization           | demo
+         Organizational Unit    | labs
+
+Step 5 : Save the CA
+         Click Save.
+         "demo-CA" now appears in the CAs list as self-signed.
+
+------------------------------------------------------------------------
+
+[ STEP B - ENABLE HTTPS INTERCEPTION IN SQUID ]
+
+Step 6 : Open Squid General Settings
+         Services --> Squid Proxy Server --> General tab
+         Scroll down to "SSL Man in the Middle Filtering" section.
+
+Step 7 : Enable HTTPS/SSL Interception
+         Check the box: "Enable SSL filtering" (HTTPS/SSL Interception)
+
+Step 8 : Configure SSL MitM Fields
+         Field                         | Value
+         ------------------------------|--------------------------------------
+         SSL/MITM Mode                 | Splice Whitelist, Bump Otherwise
+         SSL Intercept Interface(s)    | LAN
+         SSL Proxy Port                | 3129 (default)
+         SSL Proxy Compatibility Mode  | Modern
+         DHParams Key Size             | 2048 (default)
+         CA                            | demo-CA (select from dropdown)
+         Remote Cert Checks            | Do not verify remote certificate
+         Certificate Adapt             | Select ALL options:
+                                       |   - Sets the "Not After" (setValidAfter)
+                                       |   - Sets the "Not Before" (setValidBefore)
+                                       |   - Sets CN property (setCommonName)
+
+Step 9 : Save
+         Click Save.
+         Squid will now perform SSL inspection on HTTPS traffic from LAN.
+
+IMPORTANT NOTE FOR CLIENTS:
+         Client machines on the LAN MUST import the demo-CA certificate
+         into their browser's trusted root store. Otherwise every HTTPS
+         site will show a certificate warning.
+         Steps to export CA cert:
+           System --> Cert. Manager --> CAs --> Export CA (download icon)
+           Then install it in the client browser's trusted root certificates.
+
+
+================================================================================
+PHASE 8 : USER-BASED INTERNET ACCESS CONTROL
+================================================================================
+
+NOTE: Squid supports user authentication. When enabled, all browsers
+      must present a username/password before internet access is
+      granted. pfSense's local user database is used here.
+
+------------------------------------------------------------------------
+
+[ STEP A - ENABLE AUTHENTICATION ]
+
+Step 1 : Open Squid Authentication Tab
+         Services --> Squid Proxy Server --> "Authentication" tab
+
+Step 2 : Select Authentication Method
+         Under "Squid Authentication General Settings"
+         Dropdown --> Select "Local"
+
+Step 3 : Save
+         Click Save.
+
+------------------------------------------------------------------------
+
+[ STEP B - CREATE PROXY USERS ]
+
+Step 4 : Go to Users Tab
+         Services --> Squid Proxy Server --> "Users" tab
+
+Step 5 : Click Add
+         Click [+ Add] to create a new proxy user.
+
+Step 6 : Fill in User Details
+         Field        | Value (Example)
+         -------------|---------------------
+         Username     | labuser1
+         Password     | P@ssw0rd123
+         Description  | Lab Student Account
+
+Step 7 : Save the User
+         Click Save.
+         Repeat Steps 5-7 for each additional user.
+
+Step 8 : Test Authentication
+         On the client VM configure browser proxy settings:
+           Proxy server : 192.168.148.10
+           Port         : 3128
+         When accessing a website a username/password popup appears.
+         Use the credentials created above.
+
+RESULT: User-based internet access is now active.
+        Only authenticated users can browse the internet
+        through the pfSense proxy.
+
+
+================================================================================
+COMPLETE ARCHITECTURE SUMMARY
+================================================================================
+
+Component           | Role                                    | Port / Location
+--------------------|------------------------------------------|------------------------
+pfSense Firewall    | NAT, packet filtering, WAN/LAN routing  | VM - 2 NICs
+Squid Proxy         | HTTP/HTTPS proxy, logging, caching      | TCP 3128 (HTTP/3129 SSL)
+SquidGuard          | URL filtering via blacklists             | Plugin to Squid
+SSL MitM (CA)       | HTTPS inspection & content filtering    | Internal CA: demo-CA
+User Auth (Local)   | Username/password gate for internet     | Squid local user DB
+Blacklist (UT1)     | Pre-categorised URL block list          | /var/db/squidguard
+
+
+================================================================================
+QUICK REFERENCE - pfSense CONSOLE MENU OPTIONS
+================================================================================
+
+  0)  Logout (SSH only)         9)  pfTop
+  1)  Assign Interfaces         10) Filter Logs
+  2)  Set Interface(s) IP       11) Restart webConfigurator
+  3)  Reset WebGUI Password     12) PHP shell + pfSense tools
+  4)  Reset to Factory Defaults 13) Update from Console
+  5)  Reboot System             14) Enable Secure Shell (sshd)
+  6)  Halt System               15) Restore Recent Configuration
+  7)  Ping Host                 16) Restart PHP-FPM
+  8)  Shell
+
+  Use option 2 to set LAN/WAN IP addresses from console.
+
+
+================================================================================
+IMPORTANT PORTS REFERENCE
+================================================================================
+
+  Service               | Port  | Protocol
+  ----------------------|-------|----------
+  pfSense WebGUI (HTTPS)| 443   | TCP
+  Squid HTTP Proxy      | 3128  | TCP
+  Squid SSL Proxy       | 3129  | TCP
+  DNS                   | 53    | UDP/TCP
+  NTP                   | 123   | UDP
+  SSH (if enabled)      | 22    | TCP
+
+
+================================================================================
+DEFAULT CREDENTIALS (CHANGE IMMEDIATELY IN PRODUCTION)
+================================================================================
+
+  Service         | Username | Password
+  ----------------|----------|----------
+  pfSense WebGUI  | admin    | pfsense
+  Squid Proxy     | (created | (manually)
+                  |  manually|
+
+================================================================================
+                            END OF GUIDE
+================================================================================

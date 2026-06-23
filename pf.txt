@@ -1,0 +1,160 @@
+========================================================================
+             PFSENSE FIREWALL INSTALLATION & CONFIGURATION GUIDE        
+========================================================================
+
+1. CREATE A VIRTUAL MACHINE IN VMWARE
+------------------------------------------------------------------------
+* Open VMware Player and click "Create a NEW Virtual Machine".
+* Select "I will install the operating system later" and click Next.
+* Select "Linux" as the Guest Operating System.
+* Select "Ubuntu 64-bit" as the version and click Next.
+* Provide a name for the virtual machine (e.g., pfsense) and choose a 
+  path to store the files. Click Next.
+* Specify the maximum disk size as 60 GB.
+* Select "Store virtual disk as a single file" and click Next.
+* Click Finish to create the virtual machine.
+* Select the newly created VM and click "Edit virtual machine settings".
+* Click on "CD/DVD (SATA)", select "Use ISO image file", click Browse, 
+  and select your downloaded pfSense ISO file.
+* Click the "Add" button at the bottom of the settings window.
+* Select "Network Adapter" and click Finish to add a second adapter.
+* Configure the adapters:
+  - First network adapter: Set to "NAT" mode (acts as the WAN adapter).
+  - Second network adapter: Set to "Host-only" mode (acts as the LAN).
+* Click OK to close settings, then click "Play virtual machine".
+
+
+2. INSTALL THE PFSENSE OPERATING SYSTEM
+------------------------------------------------------------------------
+* Wait for the welcome installer screen to boot up.
+* Press Enter to choose "Accept" on the Copyright and distribution notice.
+* Press Enter to choose "Install" to begin installing pfSense.
+* Press Enter to select the "Default Keymap" (or select your preferred layout).
+* Press Enter to choose "Auto (ZFS)" to partition the virtual disk.
+* On the ZFS Configuration screen, select "Proceed with Installation" 
+  (Stripe - No Redundancy) and press Enter.
+* Use the Space Bar to mark the checkbox next to the "da0" disk, then 
+  press Enter to continue.
+* Select "YES" and press Enter on the "Last Chance!" prompt to confirm 
+  erasing the disk.
+* Once installation completes, choose "No" when asked to open a shell 
+  for manual modifications.
+* Press Enter to select "Reboot" and restart the virtual machine.
+
+
+3. CONFIGURE THE STATIC LAN IP ADDRESS
+------------------------------------------------------------------------
+* On your host Windows computer, open a Command Prompt.
+* Type "ipconfig" and locate the entry for "VMware Network Adapter VMnet1".
+* Note down the IP address range/subnet assigned to VMnet1.
+* Return to the pfSense console menu inside the virtual machine.
+* Type "2" and press Enter to select "Set Interface(s) IP address".
+* Type "2" again to target the LAN interface configuration.
+* Type a new LAN IP address that matches your host's VMnet1 subnet range 
+  (e.g., if VMnet1 is 192.168.148.1, use 192.168.148.10) and press Enter.
+* Type "24" for the subnet bit count and press Enter.
+* Press Enter to bypass the LAN IPv4 upstream gateway address prompt.
+* Press Enter to bypass the LAN IPv6 address prompt.
+* Type "n" and press Enter when asked to enable the DHCP server on the LAN.
+* Type "n" and press Enter when asked to revert to HTTP for the 
+  webConfigurator (this keeps the secure HTTPS option enabled).
+* Press Enter to complete the configuration and return to the main menu.
+
+
+4. RUN THE WEB INITIAL SETUP WIZARD
+------------------------------------------------------------------------
+* Start your second Virtual Machine (Windows or Linux) and ensure its 
+  network adapter is explicitly set to "Host-only" mode.
+* Open a web browser on that second VM and type: https://[IP-of-pfSense-LAN]
+* Click "Advanced" and choose to proceed past the self-signed certificate warning.
+* Log in using the default credentials:
+  - Username: admin
+  - Password: pfsense
+* Click Next on the setup wizard welcome screens.
+* Enter a Hostname, Domain name, Primary DNS (e.g., 8.8.8.8), and 
+  Secondary DNS (e.g., 8.8.4.4), then click Next.
+* Keep the Time Server settings at their default values and click Next.
+* On the WAN Interface configuration screen, keep the SelectedType as "DHCP".
+* Leave the boxes checked at the bottom for blocking RFC1918 Private 
+  Networks and Bogon Networks, then click Next.
+* Leave the LAN IP address and Subnet Mask as they are, then click Next.
+* Enter and confirm a secure new administrative password for the admin 
+  account, then click Next.
+* Click "Reload" to apply the changes.
+* Click "Check for updates" on the final screen if prompted to finish setup.
+
+
+5. INSTALL AND CONFIGURE SQUID PROXY
+------------------------------------------------------------------------
+* In the top navigation menu, go to "System" > "Package Manager".
+* Click on the "Available Packages" tab.
+* Type "squid" in the search box and press Enter.
+* Click the green "Install" button next to the "squid" package, then 
+  click "Confirm".
+* Wait for the package installation process to display a completion status.
+* Go to "Services" > "Squid Proxy Server".
+* Click on the "Local Cache" tab, review the hard disk/memory cache configurations, 
+  leave them at their default values, and click "Save" at the bottom.
+* Switch back to the "General" tab.
+* Check the box to "Enable Squid Proxy".
+* In the Proxy Interface(s) field, hold CTRL and select both "LAN" and "Loopback".
+* Ensure the Proxy Port is set to the default "3128".
+* Scroll down and check the box next to "Enable Access Logging".
+* Set a custom "Visible Hostname" and "Administrator's Email" address.
+* Scroll to the absolute bottom of the page and click "Save" to start the 
+  Squid proxy service.
+
+
+6. INSTALL AND CONFIGURE SQUIDGUARD URL FILTER
+------------------------------------------------------------------------
+* Navigate back to "System" > "Package Manager" > "Available Packages".
+* Search for "squid" again.
+* Click the green "Install" button next to the "squidGuard" package, then 
+  click "Confirm" to complete the installation.
+* Navigate to "Services" > "Squidguard Proxy Filter".
+* On the "General Settings" tab, do NOT check the enable box yet.
+* Scroll down to the Blacklist options and check the "Blacklist" checkbox.
+* In the Blacklist URL text box, enter the following archive link:
+  https://ut-capitole.fr
+* Click "Save" at the bottom of the page.
+* Navigate to the "Blacklist" tab at the top.
+* Ensure the target URL is correctly populated, then click the "Download" button.
+* Wait for the update log to show that the download has completed 100%.
+* Go to the "Target categories" tab and click the green "Add" button.
+* Enter a target category rule name (e.g., Allowed_content).
+* Check the box next to "Log" to keep records of this ACL.
+* Click "Save" to generate the target category.
+* Go back to the "General Settings" tab.
+* Check the box to "Enable squidGuard" and click the green "Apply" button 
+  to start the filtering engine.
+
+
+7. CONFIGURE SSL MAN-IN-THE-MIDDLE INTERCEPTION
+------------------------------------------------------------------------
+* Navigate to "System" > "Cert. Manager".
+* Under the "CAs" tab, click the green "Add" button to create a certificate authority.
+* Enter a Descriptive name (e.g., demo-CA).
+* In the Method drop-down menu, select "Create an Internal Certificate Authority".
+* Scroll down and enter a Common Name (e.g., internal-ca).
+* Provide location specifics like Country Code, State/Province, City, 
+  Organization, and Organizational Unit, then click "Save".
+* Navigate back to "Services" > "Squid Proxy Server".
+* On the "General" tab, scroll down to the "SSL Man In The Middle Filtering" block.
+* Check the box to "Enable SSL filtering".
+* In the SSL Intercept Interface(s) field, select "LAN".
+* In the CA field, click the drop-down menu and select your newly created CA.
+* Under "Remote cert. Checks", highlight "Do not verify remote certificate".
+* In the "Certificate Adopt" section, select all available matching properties.
+* Scroll down and click "Save".
+
+
+8. ENABLE USER-BASED ACCESS CONTROL
+------------------------------------------------------------------------
+* While still in "Squid Proxy Server", click on the "Authentication" tab.
+* In the Authentication Method drop-down list, change the option to "Local".
+* Click "Save" at the bottom of the page.
+* Switch to the "Users" tab.
+* Click the green "Add" button to create a local proxy account.
+* Provide a Username, Password, and short descriptive identifier.
+* Click "Save" to create the account.
+========================================================================
